@@ -48,6 +48,7 @@ class Epic(Base):
     reflection = Column(JSON, nullable=True)
     work_item_id = Column(String, nullable=True)
     parent_board_id = Column(String, nullable=True)
+    platform = Column(String(50), nullable=True)
 
 
 class Feature(Base):
@@ -70,6 +71,7 @@ class Feature(Base):
     work_item_id = Column(String, nullable=True)
     parent_board_id = Column(String, nullable=True)
     acceptance_criteria = Column(Text)
+    platform = Column(String(50), nullable=True)
 
 
 class UserStory(Base):
@@ -95,6 +97,7 @@ class UserStory(Base):
     reflection = Column(JSON, nullable=True)
     work_item_id = Column(String, nullable=True)
     parent_board_id = Column(String, nullable=True)
+    platform = Column(String(50), nullable=True)
 
 
 class Task(Base):
@@ -117,6 +120,7 @@ class Task(Base):
     reflection = Column(JSON, nullable=True)
     work_item_id = Column(String, nullable=True)
     parent_board_id = Column(String, nullable=True)
+    platform = Column(String(50), nullable=True)
 
 
 class Bug(Base):  # Não vamos alterar por enquanto
@@ -140,6 +144,7 @@ class Bug(Base):  # Não vamos alterar por enquanto
     reflection = Column(JSON, nullable=True)
     work_item_id = Column(String, nullable=True)
     parent_board_id = Column(String, nullable=True)
+    platform = Column(String(50), nullable=True)
 
 
 class Issue(Base):# Não vamos alterar por enquanto
@@ -161,6 +166,7 @@ class Issue(Base):# Não vamos alterar por enquanto
     reflection = Column(JSON, nullable=True)
     work_item_id = Column(String, nullable=True)
     parent_board_id = Column(String, nullable=True)
+    platform = Column(String(50), nullable=True)
 
 
 class PBI(Base):# Não vamos alterar por enquanto
@@ -182,6 +188,7 @@ class PBI(Base):# Não vamos alterar por enquanto
     reflection = Column(JSON, nullable=True)
     work_item_id = Column(String, nullable=True)
     parent_board_id = Column(String, nullable=True)
+    platform = Column(String(50), nullable=True)
 
 
 class Request(Base):
@@ -199,6 +206,7 @@ class Request(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     artifact_type = Column(String)
     artifact_id = Column(Integer)
+    platform = Column(String(50), nullable=True)
 
 
 class TestCase(Base):
@@ -222,6 +230,7 @@ class TestCase(Base):
     work_item_id = Column(String, nullable=True)
     parent_board_id = Column(String, nullable=True)
     priority = Column(String)
+    platform = Column(String(50), nullable=True)
 
     actions = relationship("Action", back_populates="test_case")  # Relacionamento 1:N com Action
 
@@ -236,6 +245,7 @@ class Action(Base):
     version = Column(Integer, default=1) # Adicionado
     is_active = Column(Boolean, default=True) # Adicionado
     test_case = relationship("TestCase", back_populates="actions") # Relacionamento com TestCase
+    platform = Column(String(50), nullable=True)
 
 
 class WBS(Base):
@@ -256,3 +266,4 @@ class WBS(Base):
     reflection = Column(JSON, nullable=True)
     work_item_id = Column(String, nullable=True)
     parent_board_id = Column(String, nullable=True)
+    platform = Column(String(50), nullable=True)

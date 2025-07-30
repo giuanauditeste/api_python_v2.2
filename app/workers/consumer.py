@@ -47,55 +47,79 @@ def _handle_task_exception(request_id: str, task_type_str: Optional[str], except
     """
     Tenta atualizar o status da requisição no DB para FAILED e enviar
     uma notificação mínima quando ocorre uma exceção não tratada na task.
+    Usa sessões de banco separadas para evitar DetachedInstanceError.
     """
     logger.error(f"Erro EXCEPCIONAL não tratado na task para ReqID {request_id}: {exception}", exc_info=True)
-    db_task = None
-    producer_task = None
     error_message = f"Erro na task Celery: {exception.__class__.__name__}: {str(exception)[:200]}" # Mensagem truncada
 
-    # 1. Tentar atualizar status no DB
+    # 1. Tentar atualizar status no DB com sessão separada
     try:
         logger.info(f"Tentando atualizar status para FAILED no DB para ReqID {request_id} via task exception handler.")
-        db_task = SessionLocal()
-        req = db_task.query(Request).filter(Request.request_id == request_id).first()
-        if req:
-            if req.status != Status.COMPLETED.value: # Só atualiza se não estiver COMPLETED
-                req.status = Status.FAILED.value
-                req.error_message = error_message
-                req.updated_at = datetime.now()
-                db_task.commit()
-                logger.info(f"Status atualizado para FAILED no DB para ReqID {request_id}.")
+        # Criar nova sessão para evitar problemas com sessões anteriores
+        with SessionLocal() as db_fail_safe:
+            req = db_fail_safe.query(Request).filter(Request.request_id == request_id).first()
+            if req:
+                if req.status != Status.COMPLETED.value: # Só atualiza se não estiver COMPLETED
+                    req.status = Status.FAILED.value
+                    req.error_message = error_message
+                    req.updated_at = datetime.now()
+                    db_fail_safe.commit()
+                    logger.info(f"Status atualizado para FAILED no DB para ReqID {request_id}.")
+                else:
+                     logger.warning(f"ReqID {request_id} já estava COMPLETED. Não atualizando status via task exception handler.")
             else:
-                 logger.warning(f"ReqID {request_id} já estava COMPLETED. Não atualizando status via task exception handler.")
-        else:
-            logger.warning(f"Não foi possível encontrar ReqID {request_id} no DB para atualizar status na task exception.")
+                logger.warning(f"Não foi possível encontrar ReqID {request_id} no DB para atualizar status na task exception.")
     except Exception as db_exc:
         logger.error(f"Erro ao tentar atualizar status no DB via task exception handler para ReqID {request_id}: {db_exc}", exc_info=True)
-        if db_task: db_task.rollback()
-    finally:
-        if db_task: db_task.close()
 
     # 2. Tentar enviar notificação mínima de falha
     try:
         logger.info(f"Tentando enviar notificação de falha mínima para ReqID {request_id} via task exception handler.")
         producer_task = RabbitMQProducer()
-        # Tenta obter o project_id da request se possível (embora possa falhar se a request não foi encontrada)
+        
+        # Tentar obter informações adicionais da request com nova sessão
         project_id_from_req = None
-        if 'req' in locals() and req and hasattr(req, 'project_id'):
-             project_id_from_req = str(req.project_id) if req.project_id else None
+        parent_from_req = None
+        parent_type_from_req = None
+        work_item_id_from_req = None
+        parent_board_id_from_req = None
+        platform_from_req = None
+        
+        try:
+            with SessionLocal() as db_info:
+                req_info = db_info.query(Request).filter(Request.request_id == request_id).first()
+                if req_info:
+                    project_id_from_req = str(req_info.project_id) if req_info.project_id else None
+                    parent_from_req = req_info.parent
+                    parent_type_from_req = req_info.parent_type
+                    work_item_id_from_req = req_info.work_item_id
+                    parent_board_id_from_req = req_info.parent_board_id
+                    platform_from_req = req_info.platform
+        except Exception as info_exc:
+            logger.warning(f"Erro ao obter informações adicionais da request {request_id}: {info_exc}")
 
         notification_data = {
-            "request_id": request_id, "status": Status.FAILED.value,
+            "request_id": request_id, 
+            "status": Status.FAILED.value,
             "error_message": error_message,
-            "project_id": project_id_from_req, "parent": None, "parent_type": None, "task_type": task_type_str,
-            "item_ids": [], "version": None, "work_item_id": None, "parent_board_id": None, "is_reprocessing": False
+            "project_id": project_id_from_req, 
+            "parent": parent_from_req, 
+            "parent_type": parent_type_from_req, 
+            "task_type": task_type_str,
+            "item_ids": [], 
+            "version": None, 
+            "work_item_id": work_item_id_from_req, 
+            "parent_board_id": parent_board_id_from_req, 
+            "is_reprocessing": False,
+            "platform": platform_from_req
         }
         producer_task.publish(notification_data, NOTIFICATION_QUEUE)
         logger.info(f"Notificação de falha mínima enviada para ReqID {request_id}.")
     except Exception as mq_exc:
-            logger.error(f"Erro ao tentar enviar notificação via task exception handler para ReqID {request_id}: {mq_exc}", exc_info=True)
+        logger.error(f"Erro ao tentar enviar notificação via task exception handler para ReqID {request_id}: {mq_exc}", exc_info=True)
     finally:
-        if producer_task: producer_task.close()
+        if 'producer_task' in locals():
+            producer_task.close()
 
 
 @celery_app.task(name="process_demand_task", bind=True) # bind=True para acessar self se precisar de retries do Celery
@@ -109,7 +133,8 @@ def process_message_task(
     llm_config: Optional[Dict[str, Any]] = None,
     work_item_id: Optional[str] = None,
     parent_board_id: Optional[str] = None,
-    type_test: Optional[str] = None
+    type_test: Optional[str] = None,
+    platform: str = None
 ):
     creator = None
     try:
@@ -127,7 +152,8 @@ def process_message_task(
             parent_board_id=parent_board_id,
             type_test=type_test,
             project_id_str=None, # Rota original não passa project_id
-            artifact_id=None
+            artifact_id=None,
+            platform=platform
         )
         logger.info(f"[Task process_demand_task] Concluída (lógica interna define status) para ReqID {request_id_interno}")
     except Exception as task_exc:
@@ -148,7 +174,8 @@ def reprocess_work_item_task(
     llm_config: Optional[Dict[str, Any]] = None,
     work_item_id: Optional[str] = None,
     parent_board_id: Optional[str] = None,
-    type_test: Optional[str] = None
+    type_test: Optional[str] = None,
+    platform: str = None
 ):
     reprocessor = None
     try:
@@ -165,7 +192,8 @@ def reprocess_work_item_task(
             type_test=type_test,
             artifact_id=artifact_id,
             project_id_str=None,
-            parent_type_str=None
+            parent_type_str=None,
+            platform=platform
         )
         logger.info(f"[Task reprocess_work_item_task] Concluída (lógica interna define status) para ReqID {request_id_interno}")
     except Exception as task_exc:
@@ -186,7 +214,8 @@ def process_independent_creation_task(
     llm_config: Optional[Dict[str, Any]] = None,
     work_item_id: Optional[str] = None,
     parent_board_id: Optional[str] = None,
-    type_test: Optional[str] = None
+    type_test: Optional[str] = None,
+    platform: str = None
 ):
     creator = None
     try:
@@ -206,7 +235,8 @@ def process_independent_creation_task(
             work_item_id=work_item_id,
             parent_board_id=parent_board_id,
             type_test=type_test,
-            artifact_id=None # Não é reprocessamento
+            artifact_id=None, # Não é reprocessamento
+            platform=platform
         )
         logger.info(f"[Task process_independent_creation_task] Concluída (lógica interna define status) para ReqID {request_id_interno}")
     except Exception as task_exc:

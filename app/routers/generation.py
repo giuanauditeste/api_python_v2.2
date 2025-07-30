@@ -8,6 +8,7 @@ from app.workers.consumer import process_message_task, reprocess_work_item_task,
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 import logging
+from uuid import UUID
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -27,17 +28,26 @@ MODEL_MAP = {
 
 @router.post("/generate/", response_model=Response, status_code=status.HTTP_201_CREATED)
 async def generate(request: RequestSchema, db: Session = Depends(get_db)):
-    logger.info(f"Requisição POST /generate/ recebida. Task Type: {request.task_type}, Parent ID: {request.parent}") # Log correto
+    logger.info(f"Requisição POST /generate/ recebida. Task Type: {request.task_type}, Parent ID: {request.parent}")
     try:
+        # Converter project_id string para UUID se fornecido
+        project_uuid = None
+        if request.project_id:
+            try:
+                project_uuid = UUID(request.project_id)
+            except ValueError:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Project ID inválido (formato UUID esperado): {request.project_id}")
+        
         db_request = DBRequest(
             request_id=str(uuid.uuid4()),
             parent=str(request.parent),
             parent_type=request.parent_type.value,
             task_type=request.task_type.value,
             status=Status.PENDING.value,
-            project_id=None,
+            project_id=project_uuid,  # Usar o project_id do payload
             artifact_type=None,
-            artifact_id=None
+            artifact_id=None,
+            platform=request.platform
         )
         db.add(db_request)
         db.commit()
@@ -56,7 +66,8 @@ async def generate(request: RequestSchema, db: Session = Depends(get_db)):
             "language": request.language,
             "work_item_id": request.work_item_id,  # <-- Passando para a task
             "parent_board_id": request.parent_board_id,
-            "type_test": request.type_test
+            "type_test": request.type_test,
+            "platform": request.platform
         }
 
         # Enviar a task para o Celery
@@ -100,7 +111,8 @@ async def get_status(request_id: str, db: Session = Depends(get_db)):
         task_type=request.task_type,
         status=request.status,
         created_at=request.created_at,
-        processed_at=request.processed_at
+        processed_at=request.processed_at,
+        platform=request.platform
     )
 
 
@@ -137,6 +149,10 @@ async def reprocess(
             detail=f"Artefato {artifact_type} com ID {artifact_id} não encontrado"
         )
 
+    # Validar que o platform do reprocessamento é igual ao do artefato
+    if existing_artifact.platform and existing_artifact.platform != request.platform:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="O valor de platform não pode ser alterado no reprocessamento.")
+
     # Determinar o parent_id com base no tipo de artefato
     if task_type_enum == TaskType.EPIC:
         parent_id = existing_artifact.team_project_id
@@ -160,7 +176,8 @@ async def reprocess(
             status=Status.PENDING.value,
             parent=str(parent_id) if parent_id is not None else None,  # Corrigido
             artifact_type=artifact_type,
-            artifact_id=artifact_id
+            artifact_id=artifact_id,
+            platform=request.platform
         )
         db.add(db_request)
         db.commit()
@@ -183,7 +200,8 @@ async def reprocess(
         "language": request.language,
         "work_item_id": request.work_item_id,
         "parent_board_id": request.parent_board_id,
-        "type_test": request.type_test
+        "type_test": request.type_test,
+        "platform": request.platform
     }
 
     try:
@@ -222,7 +240,8 @@ async def create_independent(request: IndependentCreationRequest, db: Session = 
             task_type=request.task_type.value,
             status=Status.PENDING.value,
             artifact_type=None,
-            artifact_id=None
+            artifact_id=None,
+            platform=request.platform
         )
         db.add(db_request)
         db.commit()
@@ -253,7 +272,8 @@ async def create_independent(request: IndependentCreationRequest, db: Session = 
         "language": request.language,
         "work_item_id": request.work_item_id,
         "parent_board_id": request.parent_board_id,
-        "type_test": request.type_test
+        "type_test": request.type_test,
+        "platform": request.platform
     }
 
     # Enviar a nova task para o Celery

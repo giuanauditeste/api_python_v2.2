@@ -48,7 +48,8 @@ class WorkItemProcessor(ABC):
         generated_text: str,
         artifact_id: Optional[int] = None, # ID do item (se reprocessamento)
         project_id: Optional[UUID] = None, # UUID do projeto
-        parent_type: Optional[TaskType] = None # Tipo do pai hierárquico original (pode ser None)
+        parent_type: Optional[TaskType] = None, # Tipo do pai hierárquico original (pode ser None)
+        platform: Optional[str] = None
     ) -> Tuple[List[int], int]:
         """
         Método abstrato para processar a criação ou atualização de um item
@@ -68,7 +69,8 @@ class WorkItemProcessor(ABC):
         parent_board_id: Optional[str] = None,
         type_test: Optional[str] = None,
         artifact_id: Optional[int] = None, # ID do item se for reprocessamento
-        project_id_str: Optional[str] = None # UUID do projeto (obrigatório para /independent)
+        project_id_str: Optional[str] = None, # UUID do projeto (obrigatório para /independent)
+        platform: Optional[str] = None
     ):
         """
         Orquestra o processamento completo de uma requisição (criação ou reprocessamento).
@@ -185,7 +187,8 @@ class WorkItemProcessor(ABC):
                     generated_text=generated_text,
                     artifact_id=artifact_id,
                     project_id=project_uuid, # Passa o UUID do projeto
-                    parent_type=parent_type_enum_hierarquico # Passa o tipo do pai hierárquico
+                    parent_type=parent_type_enum_hierarquico, # Passa o tipo do pai hierárquico
+                    platform=platform
                 )
 
                 # Commit e Notificação de Sucesso
@@ -204,7 +207,8 @@ class WorkItemProcessor(ABC):
                     version=new_version,
                     work_item_id=work_item_id,
                     parent_board_id=parent_board_id,
-                    is_reprocessing=(artifact_id is not None)
+                    is_reprocessing=(artifact_id is not None),
+                    platform=platform
                 )
 
             # --- Tratamento de Erros no Processamento Principal ---
@@ -357,34 +361,67 @@ class WorkItemProcessor(ABC):
         """Atualiza o status da requisição no banco de dados."""
         logger.info(f"Atualizando status para ReqID: {request_id} => {status.value}")
         try:
-            # Usar with self.db.begin_nested() talvez? Ou garantir sessão separada?
-            # Por enquanto, assume que a sessão principal está ok.
-            db_request = self.db.query(Request).filter(Request.request_id == request_id).with_for_update().first() # Lock para update
-            if db_request:
-                db_request.status = status.value
-                db_request.updated_at = datetime.now()
-                if status == Status.COMPLETED:
-                    db_request.processed_at = datetime.now()
-                if status == Status.FAILED:
-                    db_request.error_message = error_message if error_message else "Falha no processamento"
-                # Commit é feito externamente ou precisa ser feito aqui? 🤔
-                # O fluxo atual sugere que o commit principal é feito após _process_item
-                # mas para falhas, precisamos commitar a atualização de status.
-                # Vamos commitar aqui explicitamente para garantir a atualização do status em caso de falha.
-                self.db.commit()
-                logger.info(f"Status atualizado e commitado para ReqID: {request_id}")
+            # Verificar se a sessão atual está válida
+            if not self.db.is_active:
+                logger.warning(f"Sessão inativa para ReqID {request_id}, criando nova sessão para atualização de status")
+                # Criar nova sessão para atualização de status
+                with SessionLocal() as db_fail_safe:
+                    db_request = db_fail_safe.query(Request).filter(Request.request_id == request_id).with_for_update().first()
+                    if db_request:
+                        db_request.status = status.value
+                        db_request.updated_at = datetime.now()
+                        if status == Status.COMPLETED:
+                            db_request.processed_at = datetime.now()
+                        if status == Status.FAILED:
+                            db_request.error_message = error_message if error_message else "Falha no processamento"
+                        db_fail_safe.commit()
+                        logger.info(f"Status atualizado e commitado para ReqID: {request_id} (sessão separada)")
+                    else:
+                        logger.warning(f"Requisição {request_id} não encontrada para atualização de status (sessão separada).")
             else:
-                logger.warning(f"Requisição {request_id} não encontrada para atualização de status.")
+                # Usar sessão atual se estiver válida
+                db_request = self.db.query(Request).filter(Request.request_id == request_id).with_for_update().first()
+                if db_request:
+                    db_request.status = status.value
+                    db_request.updated_at = datetime.now()
+                    if status == Status.COMPLETED:
+                        db_request.processed_at = datetime.now()
+                    if status == Status.FAILED:
+                        db_request.error_message = error_message if error_message else "Falha no processamento"
+                    self.db.commit()
+                    logger.info(f"Status atualizado e commitado para ReqID: {request_id}")
+                else:
+                    logger.warning(f"Requisição {request_id} não encontrada para atualização de status.")
         except Exception as e:
             logger.error(f"Erro ao atualizar status para ReqID {request_id}: {e}", exc_info=True)
-            self.db.rollback() # Rollback da tentativa de atualização de status
+            # Tentar com sessão separada como último recurso
+            try:
+                logger.info(f"Tentando atualização de status com sessão separada para ReqID {request_id}")
+                with SessionLocal() as db_last_resort:
+                    db_request = db_last_resort.query(Request).filter(Request.request_id == request_id).first()
+                    if db_request:
+                        db_request.status = status.value
+                        db_request.updated_at = datetime.now()
+                        if status == Status.FAILED:
+                            db_request.error_message = error_message if error_message else "Falha no processamento"
+                        db_last_resort.commit()
+                        logger.info(f"Status atualizado com sucesso via sessão separada para ReqID: {request_id}")
+                    else:
+                        logger.error(f"Requisição {request_id} não encontrada mesmo com sessão separada.")
+            except Exception as last_exc:
+                logger.error(f"Falha crítica ao atualizar status para ReqID {request_id} mesmo com sessão separada: {last_exc}", exc_info=True)
+            finally:
+                # Rollback da sessão principal se ainda estiver ativa
+                if self.db.is_active:
+                    self.db.rollback()
 
 
     def send_notification(self, request_id: str, project_id: Optional[UUID], parent: Optional[str],
                           parent_type: Optional[str], task_type: str, status: Status,
                           error_message: Optional[str], item_ids: Optional[List[int]] = None,
                           version: Optional[int] = None, work_item_id: Optional[str] = None,
-                          parent_board_id: Optional[str] = None, is_reprocessing: bool = False):
+                          parent_board_id: Optional[str] = None, is_reprocessing: bool = False,
+                          platform: Optional[str] = None):
         """Envia notificação para o RabbitMQ."""
         project_id_str = str(project_id) if project_id else None
         notification_data = {
@@ -392,8 +429,10 @@ class WorkItemProcessor(ABC):
             "parent_type": parent_type, "task_type": task_type, "status": status.value,
             "error_message": error_message, "item_ids": item_ids if item_ids is not None else [],
             "version": version, "work_item_id": work_item_id, "parent_board_id": parent_board_id,
-            "is_reprocessing": is_reprocessing
+            "is_reprocessing": is_reprocessing,
+            "platform": platform
         }
+        logger.info(f"Enviando notificação ao RabbitMQ: {notification_data}")
         try:
             self.producer.publish(notification_data, rabbitmq.NOTIFICATION_QUEUE)
             logger.info(f"Notificação enviada para ReqID: {request_id}")

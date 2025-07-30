@@ -20,8 +20,8 @@ class WorkItemReprocessor(WorkItemProcessor):
         generated_text: str,
         artifact_id: Optional[int] = None, # ID do item sendo reprocessado (não pode ser None aqui)
         project_id: Optional[UUID] = None, # UUID do projeto (obtido do item existente)
-        parent_type: Optional[TaskType] = None # Tipo do pai hierárquico original (pode ser None)
-        # Adicionei parent_type aqui para consistência, embora não seja usado diretamente na lógica abaixo
+        parent_type: Optional[TaskType] = None, # Tipo do pai hierárquico original (pode ser None)
+        platform: Optional[str] = None # Campo para atualizar a plataforma
     ) -> Tuple[List[int], int]:
         """
         Reprocessa um artefato existente, atualizando seus campos com base no texto gerado.
@@ -38,6 +38,7 @@ class WorkItemReprocessor(WorkItemProcessor):
             artifact_id: O ID do artefato no banco de dados a ser atualizado.
             project_id: O UUID do projeto associado (informativo).
             parent_type: O tipo do pai hierárquico original (informativo).
+            platform: O campo para atualizar a plataforma (se ainda não estiver preenchido).
         Returns:
             Uma tupla contendo uma lista com o ID do item atualizado e a nova versão.
         Raises:
@@ -80,6 +81,9 @@ class WorkItemReprocessor(WorkItemProcessor):
         # Atualiza work_item_id e parent_board_id se foram fornecidos na request de reprocessamento
         if work_item_id is not None: existing_item.work_item_id = work_item_id
         if parent_board_id is not None: existing_item.parent_board_id = parent_board_id
+        # Atualiza platform se ainda não estiver preenchido
+        if platform and not existing_item.platform:
+            existing_item.platform = platform
 
         # Atualiza campos específicos com base no tipo de artefato
         logger.debug(f"Atualizando campos específicos para {task_type_enum.value} ID: {artifact_id}")

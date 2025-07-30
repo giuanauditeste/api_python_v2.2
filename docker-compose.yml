@@ -60,3 +60,7 @@ services:
     depends_on:
       celery_app_worker:
         condition: service_started
+
+networks:
+  my_shared_network:
+    external: true

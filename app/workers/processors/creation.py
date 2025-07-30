@@ -14,7 +14,7 @@ class WorkItemCreator(WorkItemProcessor):
     def _process_item(self, task_type_enum: TaskType, parent: int, prompt_tokens: int, completion_tokens: int,
                       work_item_id: Optional[int], parent_board_id: Optional[int], generated_text: str,
                       artifact_id: Optional[int] = None, project_id: Optional[UUID] = None, 
-                      parent_type: Optional[TaskType] = None) -> Tuple[List[int], int]:
+                      parent_type: Optional[TaskType] = None, platform: Optional[str] = None) -> Tuple[List[int], int]:
         """
         Processa a criação de um novo artefato (Epic, Feature, etc.).
         O 'parent' aqui é o ID hierárquico (pode ser None para /independent).
@@ -44,7 +44,8 @@ class WorkItemCreator(WorkItemProcessor):
             version=new_version,
             work_item_id=work_item_id,
             parent_board_id=parent_board_id,
-            project_id=project_id
+            project_id=project_id,
+            platform=platform
         )
 
         return item_ids, new_version
@@ -52,7 +53,7 @@ class WorkItemCreator(WorkItemProcessor):
     def create_new_items(self, db: Session, task_type: TaskType, generated_text: str, parent: Optional[int], 
                          parent_type: Optional[TaskType], prompt_tokens: int, 
                          completion_tokens: int, version: int, work_item_id: Optional[str], 
-                         parent_board_id: Optional[str], project_id: Optional[UUID] = None) -> List[int]:
+                         parent_board_id: Optional[str], project_id: Optional[UUID] = None, platform: Optional[str] = None) -> List[int]:
         """
         Cria novos itens no banco de dados com base no tipo de tarefa e no texto gerado pela LLM.
         Retorna uma lista de IDs dos itens criados.
@@ -129,6 +130,13 @@ class WorkItemCreator(WorkItemProcessor):
             new_epic.work_item_id = work_item_id
             new_epic.parent_board_id = parent_board_id
             if project_id: new_epic.project_id = project_id
+            # Ao criar o novo artefato, garantir que updated_at seja preenchido
+            if 'updated_at' not in new_epic.__dict__ or new_epic.updated_at is None:
+                new_epic.updated_at = datetime.now()
+
+            # Garantir que platform está sendo atribuído corretamente
+            if hasattr(new_epic, 'platform') and platform:
+                new_epic.platform = platform
             # Não precisa setar created_at/updated_at aqui, o DB faz isso via server_default/onupdate
             db.add(new_epic)
             db.flush() # Envia o comando INSERT para o DB e obtém o ID gerado
@@ -151,6 +159,12 @@ class WorkItemCreator(WorkItemProcessor):
             new_wbs.work_item_id = work_item_id
             new_wbs.parent_board_id = parent_board_id
             if project_id: new_wbs.project_id = project_id
+            # Ao criar o novo artefato, garantir que updated_at seja preenchido
+            if 'updated_at' not in new_wbs.__dict__ or new_wbs.updated_at is None:
+                new_wbs.updated_at = datetime.now()
+            # Garantir que platform está sendo atribuído corretamente
+            if hasattr(new_wbs, 'platform') and platform:
+                new_wbs.platform = platform
             db.add(new_wbs)
             db.flush()
             db.refresh(new_wbs)
@@ -191,6 +205,14 @@ class WorkItemCreator(WorkItemProcessor):
                 item.parent = parent # Salva o ID do pai (pode ser None)
                 parent_type_value = parent_type.value if parent_type else None
                 item.parent_type = parent_type_value
+
+                # Ao criar o novo artefato, garantir que updated_at seja preenchido
+                if 'updated_at' not in item.__dict__ or item.updated_at is None:
+                    item.updated_at = datetime.now()
+
+                # Garantir que platform está sendo atribuído corretamente
+                if hasattr(item, 'platform') and platform:
+                    item.platform = platform
 
                 logger.debug(f"Configurando item {task_type.value}: "
                          f"parent_id={item.parent}, parent_type={item.parent_type}, "

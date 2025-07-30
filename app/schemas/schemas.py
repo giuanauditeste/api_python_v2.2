@@ -6,6 +6,11 @@ from uuid import UUID
 # from models import TaskTypeEnum
 
 
+class PlatformEnum(str, Enum):
+    azure = "azure"
+    jira = "jira"
+
+
 class LLMConfig(BaseModel):
     llm: Optional[str] = Field("openai", description="LLM a ser usada (openai ou gemini).")
     model: Optional[str] = Field(None, description="Modelo da LLM a ser usado.")
@@ -57,20 +62,35 @@ class Request(BaseModel):
     parent_type: TaskTypeEnum = Field(..., description="Tipo do artefato pai.")
     task_type: TaskTypeEnum = Field(..., description="Tipo de tarefa a ser gerada (epic, feature, user_story, task, bug, issue, pbi, test_case).")
     prompt_data: PromptData = Field(..., description="Dados do prompt para a LLM.")
+    platform: PlatformEnum = Field(PlatformEnum.azure, description="Plataforma de destino (azure ou jira). Padrão: azure")
     language: Optional[str] = Field("português", description="Idioma para a resposta da LLM (padrão: português).")
     llm_config: Optional[LLMConfig] = Field(None, description="Configurações da LLM (opcional).")
     work_item_id: Optional[str] = Field(None, description="ID do item de trabalho no Azure DevOps (opcional).")
     parent_board_id: Optional[str] = Field(None, description="ID do quadro pai no Azure DevOps (opcional).")
     type_test: Optional[str] = Field(None, description="Tipo de teste (opcional). Ex: cypress")
+    project_id: Optional[str] = Field(None, description="ID do Projeto (UUID) ao qual o artefato pertence (opcional).")
+
+    @validator('language')
+    def check_language_valid(cls, value):
+        if value not in ["português", "inglês", "espanhol"]:
+            raise ValueError("Idioma deve ser 'português', 'inglês' ou 'espanhol'")
+        return value
 
 
 class ReprocessRequest(BaseModel):
     prompt_data: PromptData = Field(..., description="Dados do prompt para a LLM.")
+    platform: PlatformEnum = Field(PlatformEnum.azure, description="Plataforma de destino (azure ou jira). Padrão: azure")
     language: Optional[str] = Field("português", description="Idioma para a resposta da LLM (padrão: português).")
     llm_config: Optional[LLMConfig] = Field(None, description="Configurações da LLM (opcional).")
     type_test: Optional[str] = Field(None, description="Tipo de teste (opcional). Ex: cypress")
     work_item_id: Optional[str] = Field(None, description="ID do item de trabalho no Azure DevOps (opcional).")
     parent_board_id: Optional[str] = Field(None, description="ID do quadro pai no Azure DevOps (opcional).")
+
+    @validator('language')
+    def check_language_valid(cls, value):
+        if value not in ["português", "inglês", "espanhol"]:
+            raise ValueError("Idioma deve ser 'português', 'inglês' ou 'espanhol'")
+        return value
 
 
 class Response(BaseModel):
@@ -88,12 +108,14 @@ class StatusResponse(BaseModel):
     processed_at: Optional[datetime] = Field(None, description="Data de processamento da requisição (se completada).")
     artifact_type: str = Field(..., description="Tipo de artefato")
     artifact_id: int = Field(..., description="ID do artefato")
+    platform: Optional[PlatformEnum] = Field(None, description="Plataforma de destino (azure ou jira).")
 
 
 class IndependentCreationRequest(BaseModel):
     project_id: UUID = Field(..., description="ID do Projeto (UUID) ao qual o artefato pertence.")
     task_type: TaskTypeEnum = Field(..., description="Tipo de tarefa a ser gerada (epic, feature, user_story, task, etc.).")
     prompt_data: PromptData = Field(..., description="Dados do prompt para a LLM (inclui user_input).")
+    platform: PlatformEnum = Field(PlatformEnum.azure, description="Plataforma de destino (azure ou jira). Padrão: azure")
     language: Optional[str] = Field("português", description="Idioma para a resposta da LLM (padrão: português).")
     parent: Optional[int] = Field(None, description="ID do item pai (opcional para esta rota).") # Opcional
     parent_type: Optional[TaskTypeEnum] = Field(None, description="Tipo do artefato pai (obrigatório se parent ID for fornecido).")
@@ -109,6 +131,12 @@ class IndependentCreationRequest(BaseModel):
         if parent_id is not None and parent_type_value is None:
             raise ValueError('parent_type é obrigatório quando parent ID é fornecido')
         return values
+
+    @validator('language')
+    def check_language_valid(cls, value):
+        if value not in ["português", "inglês", "espanhol"]:
+            raise ValueError("Idioma deve ser 'português', 'inglês' ou 'espanhol'")
+        return value
 
 
 class ReflectionResponse(BaseModel):
