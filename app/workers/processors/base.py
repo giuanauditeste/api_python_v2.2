@@ -326,35 +326,62 @@ class WorkItemProcessor(ABC):
         logger.debug(f"Buscando itens existentes tipo {task_type.value} para pai ID {parent} e tipo pai {parent_type.value if parent_type else 'N/A'}")
         ItemModel = PARENT_MODEL_MAP.get(task_type) # Modelo do item filho
         if not ItemModel or not hasattr(ItemModel, 'parent'):
+             logger.warning(f"Modelo {task_type.value} não encontrado ou sem campo 'parent'")
              return []
 
         query = db.query(ItemModel).filter(
             ItemModel.parent == parent,
             ItemModel.is_active == True
         )
-        if parent_type and hasattr(ItemModel, 'parent_type'):
+        
+        # Para épicos, não filtrar por parent_type pois pode variar ou ser nulo
+        if task_type == TaskType.EPIC:
+            logger.debug(f"Para épicos, não filtrando por parent_type")
+        elif parent_type and hasattr(ItemModel, 'parent_type'):
            query = query.filter(ItemModel.parent_type == parent_type.value)
            logger.debug(f"Filtrando também por parent_type = {parent_type.value}")
 
-        return query.all()
+        existing_items = query.all()
+        logger.info(f"Encontrados {len(existing_items)} itens existentes do tipo {task_type.value} para parent={parent}")
+        
+        # Log detalhado dos itens encontrados
+        for item in existing_items:
+            logger.debug(f"Item encontrado: ID={item.id}, version={item.version}, is_active={item.is_active}, parent={item.parent}, parent_type={getattr(item, 'parent_type', 'N/A')}")
+        
+        return existing_items
 
     def get_new_version(self, existing_items: list) -> int:
         """Calcula a nova versão com base nos itens existentes."""
-        return max((item.version or 0) for item in existing_items) + 1 if existing_items else 1
+        if not existing_items:
+            logger.info("Nenhum item existente encontrado, usando versão 1")
+            return 1
+        
+        versions = [(item.version or 0) for item in existing_items]
+        max_version = max(versions)
+        new_version = max_version + 1
+        
+        logger.info(f"Versões encontradas: {versions}, versão máxima: {max_version}, nova versão: {new_version}")
+        return new_version
 
 
     def deactivate_existing_items(self, db: Session, items: list, task_type: TaskType):
         """Desativa itens existentes e suas ações (se for TestCase)."""
-        if not items: return
+        if not items: 
+            logger.info(f"Nenhum item para desativar do tipo {task_type.value}")
+            return
+        
         logger.info(f"Desativando {len(items)} item(ns) existente(s) do tipo {task_type.value}")
         now = datetime.now()
         for item in items:
+            logger.debug(f"Desativando item ID {item.id} do tipo {task_type.value} (versão atual: {item.version})")
             item.is_active = False
             item.updated_at = now
             if task_type == TaskType.TEST_CASE and hasattr(item, 'actions'):
                  # Desativar ações associadas
-                 self.db.query(Action).filter(Action.test_case_id == item.id, Action.is_active == True).update({"is_active": False})
-                 # logger.debug(f"Ações desativadas para TestCase ID {item.id}") # Logar pode ser verboso
+                 db.query(Action).filter(Action.test_case_id == item.id, Action.is_active == True).update({"is_active": False})
+                 logger.debug(f"Ações desativadas para TestCase ID {item.id}")
+        
+        logger.info(f"Desativação concluída para {len(items)} item(s) do tipo {task_type.value}")
 
 
     def update_request_status(self, request_id: str, status: Status, error_message: str = None):

@@ -19,13 +19,22 @@ class WorkItemCreator(WorkItemProcessor):
         Processa a criação de um novo artefato (Epic, Feature, etc.).
         O 'parent' aqui é o ID hierárquico (pode ser None para /independent).
         """
+        logger.info(f"=== INÍCIO _process_item ===")
+        logger.info(f"task_type: {task_type_enum.value}")
+        logger.info(f"parent: {parent}")
+        logger.info(f"parent_type: {parent_type.value if parent_type else 'None'}")
+        logger.info(f"platform: {platform}")
+        
         # Lógica de desativação (precisa de um 'parent' para buscar itens existentes)
         # Se parent for None, não há itens existentes para desativar/versionar com base nele.
         # A versão será sempre 1 neste caso.
         new_version = 1
         if parent is not None and parent_type is not None: # Só busca/desativa se tiver pai E tipo
+            logger.info(f"Buscando itens existentes para parent={parent}, parent_type={parent_type.value}")
             existing_items = self.get_existing_items(self.db, task_type_enum, parent, parent_type) # Passa parent_type
+            logger.info(f"Encontrados {len(existing_items)} itens existentes para {task_type_enum.value} com parent={parent}, parent_type={parent_type.value if parent_type else 'None'}")
             new_version = self.get_new_version(existing_items)
+            logger.info(f"Nova versão calculada: {new_version} para {task_type_enum.value}")
             self.deactivate_existing_items(self.db, existing_items, task_type_enum)
         elif parent is not None and parent_type is None:
              logger.warning(f"Parent ID {parent} fornecido sem parent_type em _process_item para {task_type_enum.value}. Não buscando/desativando itens existentes.")
@@ -48,6 +57,8 @@ class WorkItemCreator(WorkItemProcessor):
             platform=platform
         )
 
+        logger.info(f"_process_item retornando {len(item_ids)} IDs e versão {new_version} para {task_type_enum.value}")
+        logger.info(f"=== FIM _process_item ===")
         return item_ids, new_version
 
     def create_new_items(self, db: Session, task_type: TaskType, generated_text: str, parent: Optional[int], 
@@ -251,5 +262,6 @@ class WorkItemCreator(WorkItemProcessor):
             else:
                 logger.warning(f"Nenhum item do tipo {task_type.value} foi processado/parseado para adicionar.")
 
-            # Retorna a lista de IDs dos novos itens criados
+            # Log final dos IDs retornados
+            logger.info(f"create_new_items retornando {len(item_ids)} IDs para {task_type.value}: {item_ids}")
             return item_ids
