@@ -113,7 +113,8 @@ def parse_task_update(response: str) -> dict:
         return {
             "title": validated.title,
             "description": validated.description,
-            "estimate": validated.estimate
+            "estimate": validated.estimate,  # Agora em horas
+            "professional_direction": validated.professional_direction  # Novo campo
         }
     except (json.JSONDecodeError, ValidationError) as e:
         raise ValueError(f"Erro ao parsear Task para reprocessamento: {e}")

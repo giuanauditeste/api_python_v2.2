@@ -109,6 +109,7 @@ class Task(Base):
     project_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     description = Column(Text)
     estimate = Column(String)
+    professional_direction = Column(String(100), nullable=True)  # Novo campo: desenvolvedor, QA, DevOps, etc.
     version = Column(Integer, default=1)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

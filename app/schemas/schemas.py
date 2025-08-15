@@ -171,7 +171,8 @@ class TaskResponse(BaseModel):
     title: str = Field(..., description="Título da Task.")
     description: str = Field(..., description="Descrição detalhada da Task.")
     summary: Optional[str] = Field(None)
-    estimate: str = Field(..., description="Estimativa de tempo da Task.")
+    estimate: str = Field(..., description="Estimativa de tempo da Task em horas.")
+    professional_direction: str = Field(..., description="Direção profissional responsável pela Task (ex: desenvolvedor, QA, DevOps, etc.).")
 
 # ---  Schemas para Bug, Issue e PBI  ---
 class BugResponse(BaseModel):# Não vamos alterar por enquanto

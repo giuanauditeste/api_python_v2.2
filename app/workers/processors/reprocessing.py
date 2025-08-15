@@ -129,6 +129,7 @@ class WorkItemReprocessor(WorkItemProcessor):
              existing_item.title = updated_data.get("title", existing_item.title)
              existing_item.description = updated_data.get("description", existing_item.description)
              existing_item.estimate = updated_data.get("estimate", existing_item.estimate) # Adicionar estimate ao parser de Task update
+             existing_item.professional_direction = updated_data.get("professional_direction", existing_item.professional_direction) # Novo campo
 
         # ... (adicionar lógica para Bug, Issue, PBI se necessário) ...
 
@@ -210,6 +211,7 @@ class WorkItemReprocessor(WorkItemProcessor):
         for action_data in new_actions:
             new_action = Action(
                 step=action_data.get("step"),
-                expected_result=action_data.get("expected_result")
+                expected_result=action_data.get("expected_result"),
+                platform=test_case.platform  # Herda a plataforma do TestCase pai
             )
             test_case.actions.append(new_action)

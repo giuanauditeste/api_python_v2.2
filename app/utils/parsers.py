@@ -171,7 +171,8 @@ def parse_task_response(response: str, parent_id: int, prompt_tokens: int, compl
                     parent=parent_id,
                     title=validated_task.title,
                     description=validated_task.description,
-                    estimate=validated_task.estimate,  # <-- Adicionado
+                    estimate=validated_task.estimate,  # Agora em horas
+                    professional_direction=validated_task.professional_direction,  # Novo campo
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                 ) for validated_task in validated_tasks
@@ -182,7 +183,8 @@ def parse_task_response(response: str, parent_id: int, prompt_tokens: int, compl
                 parent=parent_id,
                 title=validated_task.title,
                 description=validated_task.description,
-                estimate=validated_task.estimate,  # <-- Adicionado
+                estimate=validated_task.estimate,  # Agora em horas
+                professional_direction=validated_task.professional_direction,  # Novo campo
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
             )]

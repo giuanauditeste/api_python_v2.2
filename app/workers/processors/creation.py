@@ -235,6 +235,9 @@ class WorkItemCreator(WorkItemProcessor):
                         # Define a versão e o status ativo para cada nova Action
                         action.version = version
                         action.is_active = True
+                        # Garantir que platform está sendo atribuído corretamente para Action
+                        if hasattr(action, 'platform') and platform:
+                            action.platform = platform
                 processed_items.append(item)
 
             # # Adiciona todos os novos itens à sessão do banco de dados
